@@ -71,6 +71,10 @@ BALL_X_SPEED = 0
 BALL_Y_SPEED = 1
 PADDLE_LOCATION = 2
 
+GAME_POOL = 2048
+PLAYERS_PER_GENERATION = 10000
+BREEDING_PER_GENERATION = 128
+
 
 class Game:
     ball_x = ball_y = 0.0  # Centre
@@ -199,9 +203,28 @@ class Player:
     hidden = 0
     outputs = 3
     fitness = 0
+    _num_weights = None
 
-    def __init__(self, weights):
+    @property
+    def num_weights(self):
+        """
+        Calcualte the number of weights we need based on inputs, hidden,
+        and outputs.
+        TODO: Handle hidden correctly, and groups the weights in a way which
+        will allow easy breeding between instances with different neurone counts
+        """
+        if self._num_weights is not None:
+            return self._num_weights
+        self._num_weights = self.inputs * self.outputs
+        return self._num_weights
+        
+
+    def __init__(self, weights=None):
+        if not weights:
+            weights = [(random.random() * 2) - 1.0 for _ in range(self.num_weights)]
         self.weights = weights
+        # TODO: Handle hidden weights here
+        # XXX: Hardcoded for now
         self.output_weights = [weights[:6], weights[6:12], weights[12:18]]
 
     def get_outputs(self, inputs):
@@ -212,6 +235,40 @@ class Player:
                 output += inputs[i] * self.output_weights[o][i]
             outputs.append(output)
         return outputs
+
+    def breed(self, partner, mutation_factor=0.02):
+        # TODO: Handle different number of neurones/weights between individuals here
+        weights = []
+        for wi in range(len(self.weights)):
+            if random.randint(0, 1):
+                weight = self.weights[wi]
+            else:
+                weight = partner.weights[wi]
+            weight += ((random.random() * 2.0) - 1.0) * mutation_factor
+            if weight > 1.0:
+                weight = 1.0
+            elif weight < -1.0:
+                weight = -1.0
+            weights.append(weight)
+        return Player(weights)
+
+    @staticmethod
+    def cross_breed(player_pool, tobreed=BREEDING_PER_GENERATION, total=PLAYERS_PER_GENERATION):
+        """
+        player_pool should be a list of players to breed sorted with the most
+        fit at the beginning of the list.
+        """
+        breeding_pool = [p[1] for p in death_pool[:tobreed]]
+        # Cross breed the top players against each other and apply random mutations
+        offspring = []
+        for p1 in range(len(breeding_pool)):
+            for p2 in range(p1 + 1, len(breeding_pool)):
+                offspring.append(breeding_pool[p1].breed(breeding_pool[p2]))
+        # Append the parents the to pool then shorten to the required total
+        # to fill in any space where new offspring were not created
+        offspring.extend(player_pool)
+        offspring = offspring[:total]
+        return player_pool
 
 
 pygame.init()
@@ -224,12 +281,9 @@ WIDTH = 1280
 HEIGHT = 1024
 windowSurface = pygame.display.set_mode((WIDTH, HEIGHT), 0, 32)
 
-GAME_POOL = 2048
-PLAYERS_PER_GENERATION = 10000
-BREEDING_PER_GENERATION = 128
 
 generation = 1
-player_pool = [Player([random.random() - 0.5 for _ in range(18)]) for _ in range(PLAYERS_PER_GENERATION)]
+player_pool = [Player() for _ in range(PLAYERS_PER_GENERATION)]
 games = [Game(player_pool.pop()) for _ in range(GAME_POOL)]
 death_pool = []
 
@@ -241,7 +295,7 @@ while True:
     for i in range(GAME_POOL):
         # TODO: Multi-thread this ideally
         if games[i] and not games[i].tick():
-            death_pool.append((games[i].speed, games[i].player.weights))
+            death_pool.append((games[i].speed, games[i].player))
             if games[i].player.fitness > best_fitness:
                 best_fitness = games[i].player.fitness
                 best_weights = games[i].player.weights
@@ -254,7 +308,7 @@ while True:
             else:
                 games[i] = None
 
-    # TODO: Only redraw the screen every 1/25th of a second
+    # Only redraw the screen every 1/25th of a second
     cur_time = time.time()
     if cur_time - last_draw >= 0.04:
         last_draw = cur_time
@@ -293,30 +347,8 @@ while True:
         print(f"End of generation {generation}. Fitness mean:{avg:0.4f} std:{std:0.4f}, 99/95/90/50/25 percentiles:", percentiles)
         # Iterate the generation!
         generation += 1
-        # 1. Sort the death_pool and take top 45 for the breeding pool
-        breeding_pool = [y[1] for y in death_pool[:BREEDING_PER_GENERATION]]
+        player_pool = Player.cross_breed([x[1] for x in death_pool])
         death_pool = []
-        # 2. Cross breed the top 45 against each other and apply random mutations
-        # This should give us 990 offspring (C(45,2)) then we can add the
-        # top parents to fill the remaining offspring
-        player_pool = []
-        for p1 in range(len(breeding_pool)):
-            for p2 in range(p1 + 1, len(breeding_pool)):
-                weights = []
-                for wi in range(len(breeding_pool[p1])):
-                    if random.randint(0, 1):
-                        weight = breeding_pool[p1][wi]
-                    else:
-                        weight = breeding_pool[p2][wi]
-                    weight += (random.random() - 0.5) * 0.05
-                    if weight > 1.0:
-                        weight = 1.0
-                    elif weight < -1.0:
-                        weight = -1.0
-                    weights.append(weight)
-                player_pool.append(weights)
-        player_pool.extend(breeding_pool)
-        player_pool = [Player(p) for p in player_pool[:PLAYERS_PER_GENERATION]]
         games = [Game(player_pool.pop()) for _ in range(GAME_POOL)]
 
     

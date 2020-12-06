@@ -6,7 +6,7 @@ import time
 import pygame, sys
 import pygame.locals
 import numpy
-import threading
+from multiprocessing import Process, Queue, Value
 import queue
 import signal
 
@@ -77,7 +77,7 @@ PADDLE_LOCATION = 2
 GAME_POOL = 1024
 PLAYERS_PER_GENERATION = 10000
 BREEDING_PER_GENERATION = 128
-GAME_THREADS = 5
+GAME_THREADS = 10
 
 
 class Game:
@@ -237,7 +237,7 @@ class Player:
             outputs.append(output)
         return outputs
 
-    def breed(self, partner, mutation_factor=0.02):
+    def breed(self, partner, mutation_factor=0.01):
         # TODO: Handle different number of neurones/weights between individuals here
         weights = []
         for wi in range(len(self.weights)):
@@ -272,19 +272,7 @@ class Player:
         return player_pool
 
 
-game_running = True
-
-
-def signal_handler(sig, frame):
-    global game_running
-    if not game_running:
-        sys.exit(1)
-    game_running = False
-    print("Exiting. Press Ctrl+C again to force quit")
-
-
-signal.signal(signal.SIGINT, signal_handler)
-
+game_running = Value('i', 1)
 
 generation = 1
 player_pool = [Player() for _ in range(PLAYERS_PER_GENERATION)]
@@ -297,17 +285,20 @@ avg = 0
 std = 0
 
 
-game_queue = queue.Queue()
-death_queue = queue.Queue()
+game_queue = Queue()
+death_queue = Queue()
 
 
 # Game thread
-def game_thread():
-    thread_id = random.randint(0, 1024)
+def game_thread(game_queue, death_queue, game_running):
     game_pool = []
-    while game_running:
+    death_pool = []
+    while game_running.value:
         # Extend players if queue has new players available and we have space
+        # Batch read from game_pool and write to death_queue to avoid threads stalling
         if len(game_pool) == 0:
+            for player in death_pool:
+                death_queue.put(player)
             while len(game_pool) < GAME_POOL:
                 try:
                     new_game = game_queue.get(block=False)
@@ -322,7 +313,7 @@ def game_thread():
             game.tick()
             if not game.running:
                 game_pool.remove(game)
-                death_queue.put(game.player)
+                death_pool.append(game.player)
 
 
 # Draw thread
@@ -341,7 +332,7 @@ def draw_thread():
 
     text_generation = font.render(f'Generation:', True, RED)
     text_deaths = font.render(f'Players:', True, RED)
-    text_fitness = font.render(f'Fit Max/Avg/Atd:', True, RED)
+    text_fitness = font.render(f'Fit Max/Avg/Std:', True, RED)
     text_percentile = font.render(f'Pct 99/95/90/50/25:', True, RED)
 
 
@@ -385,19 +376,30 @@ def draw_thread():
 # Start the threads
 threads = []
 for _ in range(GAME_THREADS):
-    t = threading.Thread(target=game_thread)
+    t = Process(target=game_thread, args=(game_queue, death_queue, game_running))
     t.start()
     threads.append(t)
-t = threading.Thread(target=draw_thread)
-t.start()
-threads.append(t)
+# Draw thread
+#t = Process(target=draw_thread)
+#t.start()
+#threads.append(t)
 
 
 # Main thread
 for game in all_games:
     game_queue.put(game)
 
-while game_running:
+def signal_handler(sig, frame):
+    global game_running
+    if not game_running.value:
+        sys.exit(1)
+    game_running.value = 0
+    print("Exiting. Press Ctrl+C again to force quit")
+
+# Only the main process should handle signals
+signal.signal(signal.SIGINT, signal_handler)
+
+while game_running.value:
     death_pool.append(death_queue.get())
     if len(death_pool) == PLAYERS_PER_GENERATION:
         death_pool = sorted(death_pool, key=lambda x: x.fitness, reverse=True)
@@ -406,7 +408,7 @@ while game_running:
         top = max(fitness_stats)
         avg = numpy.mean(fitness_stats)
         std = numpy.std(fitness_stats)
-        print(f"End of generation {generation}. Fitness mean:{avg:0.4f} std:{std:0.4f}, 99/95/90/50/25 percentiles:", ps)
+        print(f"End of generation {generation}. Fitness top:{top:0.4f} mean:{avg:0.4f} std:{std:0.4f}, 99/95/90/50/25 percentiles:", ps)
         # Iterate the generation!
         generation += 1
         player_pool = Player.cross_breed(death_pool)

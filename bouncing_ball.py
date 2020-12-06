@@ -6,6 +6,9 @@ import time
 import pygame, sys
 import pygame.locals
 import numpy
+import threading
+import queue
+import signal
 
 """
 Standard bouncing ball game where a ball will bounce around a rectangular room
@@ -71,9 +74,10 @@ BALL_X_SPEED = 0
 BALL_Y_SPEED = 1
 PADDLE_LOCATION = 2
 
-GAME_POOL = 2048
+GAME_POOL = 1024
 PLAYERS_PER_GENERATION = 10000
 BREEDING_PER_GENERATION = 128
+GAME_THREADS = 5
 
 
 class Game:
@@ -83,6 +87,7 @@ class Game:
     vector_y = 1.0  # Straight down
     paddle_x = 0.0  # Centre
     paddle_speed = 0.0  # Still
+    running = False
 
     def __init__(self, player):
         self.player = player
@@ -130,8 +135,6 @@ class Game:
             self.paddle_x = 1.0
             self.paddle_speed = 0
 
-        not_dead = True
-
         # Handle x travel and reflection of ball
         self.ball_x += outputs[BALL_X_SPEED]
         if outputs[BALL_X_SPEED] < 0.0 and self.ball_x <= -1.0:
@@ -160,7 +163,7 @@ class Game:
 
             if not (outputs[PADDLE_LOCATION] - PADDLE_WIDTH <= ball_x_cross
                     <= outputs[PADDLE_LOCATION] + PADDLE_WIDTH):
-                not_dead = False
+                self.running = False
             else:
                 # We hit the paddle, calculate the steepness of the reflection
                 # and randomise slightly to prevent exploiting easy patterns
@@ -178,8 +181,6 @@ class Game:
                 self.vector_x = math.sin((math.pi/2) * reflection)
                 self.vector_y = -math.cos((math.pi/2) * reflection)
                 self.ball_y = 1.0  # FIXME: Clamp this to the floor for now
-
-        return not_dead
 
 
 class Player:
@@ -258,7 +259,7 @@ class Player:
         player_pool should be a list of players to breed sorted with the most
         fit at the beginning of the list.
         """
-        breeding_pool = [p[1] for p in death_pool[:tobreed]]
+        breeding_pool = player_pool[:tobreed]
         # Cross breed the top players against each other and apply random mutations
         offspring = []
         for p1 in range(len(breeding_pool)):
@@ -271,86 +272,148 @@ class Player:
         return player_pool
 
 
-pygame.init()
-pygame.font.init()
-font = pygame.font.Font(pygame.font.get_default_font(), 16)
-BLACK = (0,0,0)
-RED = (255,0,0)
-GREEN = (0,255,0)
-WIDTH = 1280
-HEIGHT = 1024
-windowSurface = pygame.display.set_mode((WIDTH, HEIGHT), 0, 32)
+game_running = True
+
+
+def signal_handler(sig, frame):
+    global game_running
+    if not game_running:
+        sys.exit(1)
+    game_running = False
+    print("Exiting. Press Ctrl+C again to force quit")
+
+
+signal.signal(signal.SIGINT, signal_handler)
 
 
 generation = 1
 player_pool = [Player() for _ in range(PLAYERS_PER_GENERATION)]
-games = [Game(player_pool.pop()) for _ in range(GAME_POOL)]
+all_games = [Game(p) for p in player_pool]
 death_pool = []
 
-best_fitness = 0
-last_draw = 0
+ps = [0,0,0,0,0]
+top = 0
+avg = 0
+std = 0
 
-while True:
 
-    for i in range(GAME_POOL):
-        # TODO: Multi-thread this ideally
-        if games[i] and not games[i].tick():
-            death_pool.append((games[i].speed, games[i].player))
-            if games[i].player.fitness > best_fitness:
-                best_fitness = games[i].player.fitness
-                best_weights = games[i].player.weights
-                print(f"New High Score! Generation {generation}, Fitness {best_fitness}")
-                print(best_weights)
-                print()
-            # TODO: Do game cleanup here, add AI for post processing
-            if player_pool:
-                games[i] = Game(player_pool.pop())
-            else:
-                games[i] = None
+game_queue = queue.Queue()
+death_queue = queue.Queue()
 
-    # Only redraw the screen every 1/25th of a second
-    cur_time = time.time()
-    if cur_time - last_draw >= 0.04:
-        last_draw = cur_time
-        windowSurface.fill(BLACK)
-        pygame.draw.line(windowSurface, RED, (0, 0), (1000, 0))
-        pygame.draw.line(windowSurface, RED, (0, 0), (0, 1000))
-        pygame.draw.line(windowSurface, RED, (1000, 0), (1000, 1000))
 
-        in_progress = 0
-        for i in range(GAME_POOL):
-            g = games[i]
-            if not g:
-                continue
-            in_progress += 1
-            col = ((i * 3263) % 256, (i * 12867) % 256, (i * 9321) % 256)
-            pygame.draw.line(windowSurface, col, ((g.paddle_x - PADDLE_WIDTH + 1.0) * 500, 1000), ((g.paddle_x + PADDLE_WIDTH + 1.0) * 500, 1000))
-            pygame.draw.circle(windowSurface, col, ((g.ball_x + 1.0) * 500, (g.ball_y + 1.0) * 500), 5)
+# Game thread
+def game_thread():
+    thread_id = random.randint(0, 1024)
+    game_pool = []
+    while game_running:
+        # Extend players if queue has new players available and we have space
+        if len(game_pool) == 0:
+            while len(game_pool) < GAME_POOL:
+                try:
+                    new_game = game_queue.get(block=False)
+                    new_game.running = True  # New games must be started
+                    game_pool.append(new_game)
+                except queue.Empty:
+                    if len(game_pool) == 0:
+                        time.sleep(1)
+                    break
+        # Play the game
+        for game in game_pool:
+            game.tick()
+            if not game.running:
+                game_pool.remove(game)
+                death_queue.put(game.player)
 
-        # Draw stats to screen
-        text_generation = font.render(f'Generation: {generation}', True, RED)
-        text_deaths = font.render(f'Players: {len(death_pool)} / {PLAYERS_PER_GENERATION}', True, RED)
-        text_fitness = font.render(f'High Score: {best_fitness:.03f}', True, RED)
-        windowSurface.blit(text_generation, dest=(1010, 50))
-        windowSurface.blit(text_deaths, dest=(1010, 100))
-        windowSurface.blit(text_fitness, dest=(1010, 150))
 
-        pygame.display.flip()
-    else:
-        in_progress = 1
+# Draw thread
+def draw_thread():
+    # FIXME: This may not be the most thread safe of things
+    pygame.init()
+    pygame.font.init()
+    font = pygame.font.Font(pygame.font.get_default_font(), 16)
+    BLACK = (0,0,0)
+    RED = (255,0,0)
+    GREEN = (0,255,0)
+    WIDTH = 1280
+    HEIGHT = 1024
+    windowSurface = pygame.display.set_mode((WIDTH, HEIGHT), 0, 32)
+    last_draw = 0
 
-    if not in_progress:
-        death_pool = sorted(death_pool, key=lambda x: x[0], reverse=True)
-        percentiles = numpy.percentile([x[0] for x in death_pool], q=(99, 95, 90, 50, 25))
-        avg = numpy.mean([x[0] for x in death_pool])
-        std = numpy.std([x[0] for x in death_pool])
-        print(f"End of generation {generation}. Fitness mean:{avg:0.4f} std:{std:0.4f}, 99/95/90/50/25 percentiles:", percentiles)
+    text_generation = font.render(f'Generation:', True, RED)
+    text_deaths = font.render(f'Players:', True, RED)
+    text_fitness = font.render(f'Fit Max/Avg/Atd:', True, RED)
+    text_percentile = font.render(f'Pct 99/95/90/50/25:', True, RED)
+
+
+    while game_running:
+        cur_time = time.time()
+        if cur_time - last_draw >= 0.02:
+            last_draw = cur_time
+            windowSurface.fill(BLACK)
+            pygame.draw.line(windowSurface, RED, (0, 0), (1000, 0))
+            pygame.draw.line(windowSurface, RED, (0, 0), (0, 1000))
+            pygame.draw.line(windowSurface, RED, (1000, 0), (1000, 1000))
+
+            for i in range(len(all_games)):
+                g = all_games[i]
+                if not g.running:
+                    continue
+                col = ((i * 3263) % 256, (i * 12867) % 256, (i * 9321) % 256)
+                pygame.draw.line(windowSurface, col, ((g.paddle_x - PADDLE_WIDTH + 1.0) * 500, 1000), ((g.paddle_x + PADDLE_WIDTH + 1.0) * 500, 1000))
+                pygame.draw.circle(windowSurface, col, ((g.ball_x + 1.0) * 500, (g.ball_y + 1.0) * 500), 5)
+
+            # Draw stats to screen
+            text_generation_data = font.render(f'{generation}', False, RED)
+            text_deaths_data = font.render(f'{len(death_pool)} / {PLAYERS_PER_GENERATION}', False, RED)
+            text_fitness_data = font.render(f'{top:.03f}/{avg:.03f}/{std:.03f}', False, RED)
+            text_percentile_data = font.render(f'{ps[0]:.03f}/{ps[1]:.03f}/{ps[2]:.03f}/{ps[3]:.03f}/{ps[4]:.03f}', False, RED)
+
+            windowSurface.blit(text_generation, dest=(1010, 50))
+            windowSurface.blit(text_generation_data, dest=(1150, 50))
+            windowSurface.blit(text_deaths, dest=(1010, 75))
+            windowSurface.blit(text_deaths_data, dest=(1100, 75))
+            windowSurface.blit(text_fitness, dest=(1010, 100))
+            windowSurface.blit(text_fitness_data, dest=(1020, 125))
+            windowSurface.blit(text_percentile, dest=(1010, 150))
+            windowSurface.blit(text_percentile_data, dest=(1020, 175))
+
+            pygame.display.flip()
+        else:
+            time.sleep(0.01)
+
+
+# Start the threads
+threads = []
+for _ in range(GAME_THREADS):
+    t = threading.Thread(target=game_thread)
+    t.start()
+    threads.append(t)
+t = threading.Thread(target=draw_thread)
+t.start()
+threads.append(t)
+
+
+# Main thread
+for game in all_games:
+    game_queue.put(game)
+
+while game_running:
+    death_pool.append(death_queue.get())
+    if len(death_pool) == PLAYERS_PER_GENERATION:
+        death_pool = sorted(death_pool, key=lambda x: x.fitness, reverse=True)
+        fitness_stats = [x.fitness for x in death_pool]
+        ps = numpy.percentile(fitness_stats, q=(99, 95, 90, 50, 25))
+        top = max(fitness_stats)
+        avg = numpy.mean(fitness_stats)
+        std = numpy.std(fitness_stats)
+        print(f"End of generation {generation}. Fitness mean:{avg:0.4f} std:{std:0.4f}, 99/95/90/50/25 percentiles:", ps)
         # Iterate the generation!
         generation += 1
-        player_pool = Player.cross_breed([x[1] for x in death_pool])
+        player_pool = Player.cross_breed(death_pool)
         death_pool = []
-        games = [Game(player_pool.pop()) for _ in range(GAME_POOL)]
+        all_games = [Game(player) for player in player_pool]
+        for game in all_games:
+            game_queue.put(game)
 
-    
-
-    #time.sleep(0.025)
+for t in threads:
+    t.join()

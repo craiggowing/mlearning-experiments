@@ -1,4 +1,28 @@
 #!/usr/bin/env python3
+"""
+MIT License
+
+Copyright (c) 2020 Craig Gowing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 
 import math
 import random
@@ -41,7 +65,6 @@ TODO:
 * The main game engine should separate out the graphical elements and the
   game physics/AI elements so can be run independantly, ie run AI with no
   graphics, and run graphics against a replay rather than live game data
-* The game ticks should be multi threaded for maximum performance.
 * Each game also does not require syncronisation so for better previews it would
   be nice to slow down players as they go above the average group fitness and
   just display these games on the graphical output so it actually means something
@@ -49,10 +72,11 @@ TODO:
   This needs jazzing up a bit!
 * We have no visual indicator of the neural network other than them being dumped
   to stdout on each high score, this could get a nice graphical output
-* Make Player class more generic and handle breeding as class methods instead of
-  code in the game ticker
-* The Player class should also handle initial random states, and loading from
-  saved player pools so we can restore a generation
+* Make Player class more generic and improve breeding methods so we can use
+  genes to decide between things like sigmoid or linear rectification methods
+  when calculating a neurone state
+* The Player class should handle loading from saved player pools so we can
+  restore a generation
 
 Further experimentation:
 * The Player class should also ideally be able to mutate random hidden neurones

@@ -275,14 +275,20 @@ class Player:
 game_running = Value('i', 1)
 
 generation = 1
-player_pool = [Player() for _ in range(PLAYERS_PER_GENERATION)]
-all_games = [Game(p) for p in player_pool]
-death_pool = []
 
 ps = [0,0,0,0,0]
 top = 0
 avg = 0
 std = 0
+
+stats = {
+    'generation': generation,
+    'top': top,
+    'avg': avg,
+    'std': std,
+    'ps': ps,
+    'death_pool': 0,
+}
 
 
 game_queue = Queue()
@@ -298,6 +304,7 @@ def game_thread(game_queue, death_queue, game_running):
         # Batch read from game_pool and write to death_queue to avoid threads stalling
         if len(game_pool) == 0:
             for player in death_pool:
+                death_pool.remove(player)
                 death_queue.put(player)
             while len(game_pool) < GAME_POOL:
                 try:
@@ -316,57 +323,61 @@ def game_thread(game_queue, death_queue, game_running):
                 death_pool.append(game.player)
 
 
-# Draw thread
-def draw_thread():
-    # FIXME: This may not be the most thread safe of things
-    pygame.init()
-    pygame.font.init()
-    font = pygame.font.Font(pygame.font.get_default_font(), 16)
+# Draw engine
+class DrawWorker:
     BLACK = (0,0,0)
     RED = (255,0,0)
     GREEN = (0,255,0)
     WIDTH = 1280
     HEIGHT = 1024
-    windowSurface = pygame.display.set_mode((WIDTH, HEIGHT), 0, 32)
-    last_draw = 0
 
-    text_generation = font.render(f'Generation:', True, RED)
-    text_deaths = font.render(f'Players:', True, RED)
-    text_fitness = font.render(f'Fit Max/Avg/Std:', True, RED)
-    text_percentile = font.render(f'Pct 99/95/90/50/25:', True, RED)
+    def __init__(self):
+        pygame.init()
+        pygame.font.init()
+        self.font = pygame.font.Font(pygame.font.get_default_font(), 16)
+        self.windowSurface = pygame.display.set_mode((DrawWorker.WIDTH, DrawWorker.HEIGHT), 0, 32)
+        self.last_draw = 0
 
+        self.text_generation = self.font.render(f'Generation:', True, DrawWorker.RED)
+        self.text_deaths = self.font.render(f'Players:', True, DrawWorker.RED)
+        self.text_fitness = self.font.render(f'Fit Max/Avg/Std:', True, DrawWorker.RED)
+        self.text_percentile = self.font.render(f'Pct 99/95/90/50/25:', True, DrawWorker.RED)
 
-    while game_running:
+    def draw_frame(self, games, stats, frame_delay=0.2):
         cur_time = time.time()
-        if cur_time - last_draw >= 0.02:
-            last_draw = cur_time
-            windowSurface.fill(BLACK)
-            pygame.draw.line(windowSurface, RED, (0, 0), (1000, 0))
-            pygame.draw.line(windowSurface, RED, (0, 0), (0, 1000))
-            pygame.draw.line(windowSurface, RED, (1000, 0), (1000, 1000))
+        if not frame_delay or (cur_time - self.last_draw >= frame_delay):
+            self.last_draw = cur_time
+            self.windowSurface.fill(DrawWorker.BLACK)
+            pygame.draw.line(self.windowSurface, DrawWorker.RED, (0, 0), (1000, 0))
+            pygame.draw.line(self.windowSurface, DrawWorker.RED, (0, 0), (0, 1000))
+            pygame.draw.line(self.windowSurface, DrawWorker.RED, (1000, 0), (1000, 1000))
 
-            for i in range(len(all_games)):
-                g = all_games[i]
-                if not g.running:
-                    continue
+            for i in range(len(games)):
+                g = games[i]
                 col = ((i * 3263) % 256, (i * 12867) % 256, (i * 9321) % 256)
-                pygame.draw.line(windowSurface, col, ((g.paddle_x - PADDLE_WIDTH + 1.0) * 500, 1000), ((g.paddle_x + PADDLE_WIDTH + 1.0) * 500, 1000))
-                pygame.draw.circle(windowSurface, col, ((g.ball_x + 1.0) * 500, (g.ball_y + 1.0) * 500), 5)
+                pygame.draw.line(self.windowSurface, col, ((g.paddle_x - PADDLE_WIDTH + 1.0) * 500, 1000), ((g.paddle_x + PADDLE_WIDTH + 1.0) * 500, 1000))
+                pygame.draw.circle(self.windowSurface, col, ((g.ball_x + 1.0) * 500, (g.ball_y + 1.0) * 500), 5)
 
             # Draw stats to screen
-            text_generation_data = font.render(f'{generation}', False, RED)
-            text_deaths_data = font.render(f'{len(death_pool)} / {PLAYERS_PER_GENERATION}', False, RED)
-            text_fitness_data = font.render(f'{top:.03f}/{avg:.03f}/{std:.03f}', False, RED)
-            text_percentile_data = font.render(f'{ps[0]:.03f}/{ps[1]:.03f}/{ps[2]:.03f}/{ps[3]:.03f}/{ps[4]:.03f}', False, RED)
+            text_generation_data = self.font.render(f'{stats["generation"]}',
+                                                    True, DrawWorker.RED)
+            text_deaths_data = self.font.render(f'{stats["death_pool"]} / {PLAYERS_PER_GENERATION}',
+                                                True, DrawWorker.RED)
+            text_fitness_data = self.font.render(f'{stats["top"]:.03f}/{stats["avg"]:.03f}/{stats["std"]:.03f}',
+                                                True, DrawWorker.RED)
+            text_percentile_data = self.font.render(
+                f'{stats["ps"][0]:.03f}/{stats["ps"][1]:.03f}/'
+                f'{stats["ps"][2]:.03f}/{stats["ps"][3]:.03f}/'
+                f'{stats["ps"][4]:.03f}', True, DrawWorker.RED)
 
-            windowSurface.blit(text_generation, dest=(1010, 50))
-            windowSurface.blit(text_generation_data, dest=(1150, 50))
-            windowSurface.blit(text_deaths, dest=(1010, 75))
-            windowSurface.blit(text_deaths_data, dest=(1100, 75))
-            windowSurface.blit(text_fitness, dest=(1010, 100))
-            windowSurface.blit(text_fitness_data, dest=(1020, 125))
-            windowSurface.blit(text_percentile, dest=(1010, 150))
-            windowSurface.blit(text_percentile_data, dest=(1020, 175))
+            self.windowSurface.blit(self.text_generation, dest=(1010, 50))
+            self.windowSurface.blit(text_generation_data, dest=(1150, 50))
+            self.windowSurface.blit(self.text_deaths, dest=(1010, 75))
+            self.windowSurface.blit(text_deaths_data, dest=(1100, 75))
+            self.windowSurface.blit(self.text_fitness, dest=(1010, 100))
+            self.windowSurface.blit(text_fitness_data, dest=(1020, 125))
+            self.windowSurface.blit(self.text_percentile, dest=(1010, 150))
+            self.windowSurface.blit(text_percentile_data, dest=(1020, 175))
 
             pygame.display.flip()
         else:
@@ -379,13 +390,13 @@ for _ in range(GAME_THREADS):
     t = Process(target=game_thread, args=(game_queue, death_queue, game_running))
     t.start()
     threads.append(t)
-# Draw thread
-#t = Process(target=draw_thread)
-#t.start()
-#threads.append(t)
 
 
 # Main thread
+player_pool = [Player() for _ in range(PLAYERS_PER_GENERATION)]
+all_games = [Game(p) for p in player_pool]
+death_pool = []
+
 for game in all_games:
     game_queue.put(game)
 
@@ -399,8 +410,17 @@ def signal_handler(sig, frame):
 # Only the main process should handle signals
 signal.signal(signal.SIGINT, signal_handler)
 
+drawer = DrawWorker()
+draw_game_pool = []
+draw_death_pool = []
 while game_running.value:
-    death_pool.append(death_queue.get())
+    # Collect dead players
+    while True:
+        try:
+            death_pool.append(death_queue.get(block=False))
+        except queue.Empty:
+            break
+    # Handle dead players
     if len(death_pool) == PLAYERS_PER_GENERATION:
         death_pool = sorted(death_pool, key=lambda x: x.fitness, reverse=True)
         fitness_stats = [x.fitness for x in death_pool]
@@ -416,6 +436,33 @@ while game_running.value:
         all_games = [Game(player) for player in player_pool]
         for game in all_games:
             game_queue.put(game)
+        stats = {
+            'generation': generation,
+            'top': top,
+            'avg': avg,
+            'std': std,
+            'ps': ps,
+        }
+    # Draw select few games and print stats
+    stats["death_pool"] = len(death_pool)
+    if len(draw_game_pool) < 10:
+        for player in draw_death_pool:
+            draw_death_pool.remove(player)
+            death_queue.put(player)
+        while len(draw_game_pool) < 10:
+            try:
+                new_game = game_queue.get(block=False)
+                new_game.running = True  # New games must be started
+                draw_game_pool.append(new_game)
+            except queue.Empty:
+                break
+    for game in draw_game_pool:
+        game.tick()
+        if not game.running:
+            draw_game_pool.remove(game)
+            draw_death_pool.append(game.player)
+    drawer.draw_frame(draw_game_pool, stats, frame_delay=0)
+
 
 for t in threads:
     t.join()

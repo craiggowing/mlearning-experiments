@@ -80,6 +80,21 @@ BREEDING_PER_GENERATION = 128
 GAME_THREADS = 10
 
 
+def sigmoid(x):
+    """
+    Generic sigmoid curve between y=0 and 1, passing through 0,0.5
+    """
+    return 1 / (1 + math.exp(-x))
+
+
+def trans_sigmoid(x):
+    """
+    Sigmoid curve translated to pass through 0,0 and gives a y value
+    between -1 and 1
+    """
+    return 2 * (sigmoid(x) - 0.5)
+
+
 class Game:
     ball_x = ball_y = 0.0  # Centre
     speed = 0.01
@@ -233,8 +248,8 @@ class Player:
         for o in range(self.outputs):
             output = 0.0
             for i in range(self.inputs):
-                output += inputs[i] * self.output_weights[o][i]
-            outputs.append(output)
+                output += trans_sigmoid(inputs[i]) * self.output_weights[o][i]
+            outputs.append(sigmoid(output))
         return outputs
 
     def breed(self, partner, mutation_factor=0.01):

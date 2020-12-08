@@ -79,6 +79,27 @@ PLAYERS_PER_GENERATION = 10000
 BREEDING_PER_GENERATION = 128
 GAME_THREADS = 10
 
+game_running = Value('i', 1)
+
+
+def signal_handler_main(sig, frame):
+    global game_running
+    if not game_running.value:
+        sys.exit(1)
+    game_running.value = 0
+    print("Exiting. Press Ctrl+C again to force quit")
+
+
+quit_signal = False
+
+
+def signal_handler_thread(sig, frame):
+    global quit_signal
+    if quit_signal:
+        sys.exit(1)
+    print("Waiting for main process to quit. Press Ctrl+C again to force quit")
+    quit_signal = True
+
 
 def sigmoid(x):
     """
@@ -287,8 +308,6 @@ class Player:
         return player_pool
 
 
-game_running = Value('i', 1)
-
 generation = 1
 
 ps = [0,0,0,0,0]
@@ -312,6 +331,7 @@ death_queue = Queue()
 
 # Game thread
 def game_thread(game_queue, death_queue, game_running):
+    signal.signal(signal.SIGINT, signal_handler_thread)
     game_pool = []
     death_pool = []
     while game_running.value:
@@ -415,15 +435,8 @@ death_pool = []
 for game in all_games:
     game_queue.put(game)
 
-def signal_handler(sig, frame):
-    global game_running
-    if not game_running.value:
-        sys.exit(1)
-    game_running.value = 0
-    print("Exiting. Press Ctrl+C again to force quit")
-
 # Only the main process should handle signals
-signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGINT, signal_handler_main)
 
 drawer = DrawWorker()
 draw_game_pool = []
@@ -478,6 +491,12 @@ while game_running.value:
             draw_death_pool.append(game.player)
     drawer.draw_frame(draw_game_pool, stats, frame_delay=0)
 
-
+print("Main process exiting, waiting for children...")
 for t in threads:
     t.join()
+game_queue.close()
+game_queue.join_thread()
+death_queue.close()
+death_queue.join_thread()
+print("All children terminated, main process exiting.")
+sys.exit(0)

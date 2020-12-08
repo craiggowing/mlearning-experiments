@@ -264,7 +264,7 @@ class Player:
             outputs.append(sigmoid(output + self.output_bias[o]))
         return outputs
 
-    def breed(self, partner, mutation_factor=0.01):
+    def breed(self, partner, mutation_factor=0.01, mutation_prop=0.2):
         # TODO: Handle different number of neurones/weights between individuals here
         weights = []
         biases = []
@@ -273,7 +273,8 @@ class Player:
                 weight = self.weights[wi]
             else:
                 weight = partner.weights[wi]
-            weight += ((random.random() * 2.0) - 1.0) * mutation_factor
+            if random.random() <= mutation_prop:
+                weight += ((random.random() * 2.0) - 1.0) * mutation_factor
             if weight > 1.0:
                 weight = 1.0
             elif weight < -1.0:
@@ -284,7 +285,8 @@ class Player:
                 bias = self.biases[wi]
             else:
                 bias = partner.biases[wi]
-            bias += ((random.random() * 2.0) - 1.0) * mutation_factor
+            if random.random() <= mutation_prop:
+                bias += ((random.random() * 2.0) - 1.0) * mutation_factor
             if bias > 1.0:
                 bias = 1.0
             elif bias < -1.0:

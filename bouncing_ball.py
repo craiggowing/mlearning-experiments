@@ -240,29 +240,20 @@ class Player:
     hidden = 0
     outputs = 3
     fitness = 0
-    _num_weights = None
+    num_weights = 18  # 6*3 connections from in to out
+    num_biases = 3  # 3 output neurones
 
-    @property
-    def num_weights(self):
-        """
-        Calcualte the number of weights we need based on inputs, hidden,
-        and outputs.
-        TODO: Handle hidden correctly, and groups the weights in a way which
-        will allow easy breeding between instances with different neurone counts
-        """
-        if self._num_weights is not None:
-            return self._num_weights
-        self._num_weights = self.inputs * self.outputs
-        return self._num_weights
-        
-
-    def __init__(self, weights=None):
+    def __init__(self, weights=None, biases=None):
         if not weights:
             weights = [(random.random() * 2) - 1.0 for _ in range(self.num_weights)]
+        if not biases:
+            biases = [(random.random() * 2) - 1.0 for _ in range(self.num_biases)]
+        self.biases = biases
         self.weights = weights
         # TODO: Handle hidden weights here
         # XXX: Hardcoded for now
         self.output_weights = [weights[:6], weights[6:12], weights[12:18]]
+        self.output_bias = biases
 
     def get_outputs(self, inputs):
         outputs = []
@@ -270,12 +261,13 @@ class Player:
             output = 0.0
             for i in range(self.inputs):
                 output += trans_sigmoid(inputs[i]) * self.output_weights[o][i]
-            outputs.append(sigmoid(output))
+            outputs.append(sigmoid(output + self.output_bias[o]))
         return outputs
 
     def breed(self, partner, mutation_factor=0.01):
         # TODO: Handle different number of neurones/weights between individuals here
         weights = []
+        biases = []
         for wi in range(len(self.weights)):
             if random.randint(0, 1):
                 weight = self.weights[wi]
@@ -287,7 +279,18 @@ class Player:
             elif weight < -1.0:
                 weight = -1.0
             weights.append(weight)
-        return Player(weights)
+        for wi in range(len(self.biases)):
+            if random.randint(0, 1):
+                bias = self.biases[wi]
+            else:
+                bias = partner.biases[wi]
+            bias += ((random.random() * 2.0) - 1.0) * mutation_factor
+            if bias > 1.0:
+                bias = 1.0
+            elif bias < -1.0:
+                bias = -1.0
+            biases.append(bias)
+        return Player(weights, biases)
 
     @staticmethod
     def cross_breed(player_pool, tobreed=BREEDING_PER_GENERATION, total=PLAYERS_PER_GENERATION):

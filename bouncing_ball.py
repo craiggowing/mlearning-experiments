@@ -335,7 +335,7 @@ class Player:
         # to fill in any space where new offspring were not created
         offspring.extend(player_pool)
         offspring = offspring[:total]
-        return player_pool
+        return offspring
 
 
 generation = 1

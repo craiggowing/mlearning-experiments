@@ -230,7 +230,7 @@ class Game:
                 # FIXME: This does not take into account the current ball angle
                 # FIXME: The ball will not continue traveling from the paddle
                 # until the next tick
-                self.speed += 0.001
+                self.speed = (self.speed + 0.001) * 1.05
                 self.player.fitness += self.speed
                 reflection = (ball_x_cross - outputs[PADDLE_LOCATION]) / PADDLE_WIDTH
                 reflection += (random.random() - 0.5) * 0.3

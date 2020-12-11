@@ -70,13 +70,21 @@ TODO:
   just display these games on the graphical output so it actually means something
 * The graphics are a bit naff and inefficient (eg redrawing static text each frame)
   This needs jazzing up a bit!
-* We have no visual indicator of the neural network other than them being dumped
-  to stdout on each high score, this could get a nice graphical output
-* Make Player class more generic and improve breeding methods so we can use
-  genes to decide between things like sigmoid or linear rectification methods
-  when calculating a neurone state
 * The Player class should handle loading from saved player pools so we can
   restore a generation
+* We need some way of showing genetic diversity across both the entire pool, and
+  across just the top performers. The selection algorithm should then be
+  weighted to select for diversity across the top performers to prevent the pool
+  from effectively just become a clone of the best player.
+* They are getting pretty good at this now and just increasing the speed will
+  cause them to fail through no fault of their own (either they cannot
+  physically move the paddle fast enough, or the game glitches out). We need to
+  start adding additional challenges for them once they master hitting the ball,
+  so gradual speed increase up until a point, then start adding targets for them
+  to hit, where the fitness is increased based on how fast they are hit. We
+  will need to add 2 more input neurons so they can find it however, so maybe
+  cleaning up the Player class and allowing hidden neurones may be best to do
+  first.
 
 Further experimentation:
 * The Player class should also ideally be able to mutate random hidden neurones

@@ -314,6 +314,9 @@ class Player:
         self.output_weights = [weights[:8], weights[8:16], weights[16:24]]
         self.output_bias = biases
 
+    def reset(self):
+        self.fitness = 0
+
     def get_outputs(self, inputs):
         outputs = []
         for o in range(self.outputs):
@@ -370,6 +373,8 @@ class Player:
         # to fill in any space where new offspring were not created
         offspring.extend(player_pool)
         offspring = offspring[:total]
+        for o in offspring:
+            o.reset()
         return offspring
 
 

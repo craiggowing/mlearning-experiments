@@ -105,6 +105,8 @@ PADDLE_ACC_RIGHT = 1
 BALL_X_SPEED = 0
 BALL_Y_SPEED = 1
 PADDLE_LOCATION = 2
+TARGET_X_OFFSET = 3
+TARGET_Y_OFFSET = 4
 
 GAME_POOL = 128
 PLAYERS_PER_GENERATION = 10000
@@ -157,14 +159,18 @@ class Game:
     paddle_speed = 0.0  # Still
     running = False
 
-    def __init__(self, player):
+    def __init__(self, player, target_threshold=0.05):
         self.player = player
+        self.target = None
+        self.target_threshold = 0.05
 
     def get_outputs(self):
         return [
             (self.speed * self.vector_x),  # BALL_X_SPEED (0)
             (self.speed * self.vector_y),  # BALL_Y_SPEED (1)
             self.paddle_x,                 # PADDLE_LOCATION (2)
+            self.target and (self.target[0] - self.ball_x) or 0.0,  # TARGET_X_OFFSET = 3
+            self.target and (self.target[1] - self.ball_y) or 0.0,  # TARGET_Y_OFFSET = 4
         ]
         
     def tick(self):
@@ -177,6 +183,8 @@ class Game:
             outputs[BALL_X_SPEED],       # Ball speed x
             outputs[BALL_Y_SPEED],       # Ball speed y
             self.paddle_speed,           # Paddle x speed
+            outputs[TARGET_X_OFFSET],    # Target x offset
+            outputs[TARGET_Y_OFFSET],    # Target y offset
         ])
 
         inp_dir = player_outputs
@@ -238,8 +246,15 @@ class Game:
                 # FIXME: This does not take into account the current ball angle
                 # FIXME: The ball will not continue traveling from the paddle
                 # until the next tick
-                self.speed = (self.speed + 0.001) * 1.05
-                self.player.fitness += self.speed
+                if self.speed <= self.target_threshold:
+                    self.speed = self.speed + 0.005
+                    self.player.fitness += self.speed
+                elif self.target:
+                    self.target[2] -= 0.1  # Reduce the target score for each paddle hit
+                    if self.target[2] <= -1.0:  # End the game when the score gets too low
+                        self.player.fitness += self.target[2]
+                        self.running = False
+
                 reflection = (ball_x_cross - outputs[PADDLE_LOCATION]) / PADDLE_WIDTH
                 reflection += (random.random() - 0.5) * 0.3
                 if reflection <= -0.9:
@@ -249,6 +264,18 @@ class Game:
                 self.vector_x = math.sin((math.pi/2) * reflection)
                 self.vector_y = -math.cos((math.pi/2) * reflection)
                 self.ball_y = 1.0  # FIXME: Clamp this to the floor for now
+
+        # Check ball collision with target
+        if self.target:
+            total_offset = math.sqrt((outputs[TARGET_X_OFFSET] ** 2)
+                                     + (outputs[TARGET_Y_OFFSET] ** 2))
+            if total_offset <= 0.05:
+                self.player.fitness += self.target[2]
+                self.target = None
+        if not self.target and self.speed >= self.target_threshold:
+            self.target = [(random.random() * 1.9) - 0.95,
+                           (random.random() * 1.9) - 0.95,
+                           1.0]
 
 
 class Player:
@@ -268,11 +295,11 @@ class Player:
         Paddle move right
     """
 
-    inputs = 6
+    inputs = 8
     hidden = 0
     outputs = 3
     fitness = 0
-    num_weights = 18  # 6*3 connections from in to out
+    num_weights = 24  # 8*3 connections from in to out
     num_biases = 3  # 3 output neurones
 
     def __init__(self, weights=None, biases=None):
@@ -284,7 +311,7 @@ class Player:
         self.weights = weights
         # TODO: Handle hidden weights here
         # XXX: Hardcoded for now
-        self.output_weights = [weights[:6], weights[6:12], weights[12:18]]
+        self.output_weights = [weights[:8], weights[8:16], weights[16:24]]
         self.output_bias = biases
 
     def get_outputs(self, inputs):
@@ -430,6 +457,8 @@ class DrawWorker:
                 col = ((i * 3263) % 256, (i * 12867) % 256, (i * 9321) % 256)
                 pygame.draw.line(self.windowSurface, col, ((g.paddle_x - PADDLE_WIDTH + 1.0) * 500, 1000), ((g.paddle_x + PADDLE_WIDTH + 1.0) * 500, 1000))
                 pygame.draw.circle(self.windowSurface, col, ((g.ball_x + 1.0) * 500, (g.ball_y + 1.0) * 500), 5)
+                if g.target:
+                    pygame.draw.circle(self.windowSurface, col, ((g.target[0] + 1.0) * 500, (g.target[1] + 1.0) * 500), 25)
 
             # Draw stats to screen
             text_generation_data = self.font.render(f'{stats["generation"]}',

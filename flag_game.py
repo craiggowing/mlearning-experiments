@@ -36,7 +36,7 @@ class Game:
     def init_draw(self):
         pygame.init()
         self.clock = pygame.time.Clock()
-        self.draw_surface = pygame.display.set_mode(((self.width + 2) * CELL_SIZE, (self.height + 2) * CELL_SIZE))
+        self.draw_surface = pygame.display.set_mode((((self.width + 2) * CELL_SIZE) + 300, (self.height + 2) * CELL_SIZE))
         pygame.display.set_caption("Flag Game")
         self.font = pygame.font.SysFont(None, 25)
 
@@ -82,11 +82,41 @@ class Game:
             (255, 255, 255),
             (x, y),
             (x + x_off, y + y_off),
+            width = 3,
         )
+        # Draw collisions
+        for angle in range(16):
+            intensity, x_off, y_off = self.find_collision(angle / 16)
+            pygame.draw.line(
+                self.draw_surface,
+                (0, int(255 * intensity), int(255 * intensity)),
+                (x, y),
+                (x + (x_off * CELL_SIZE), y + (y_off * CELL_SIZE)),
+            )
         # Draw score
+        text_edge = ((self.width + 2) * CELL_SIZE) + 5
+        pygame.draw.rect(
+            self.draw_surface,
+            (50, 50, 50),
+            pygame.Rect(text_edge, 0, text_edge + 300, (self.height + 2) * CELL_SIZE),
+        )
+
         text = self.font.render(f"Score: {self.points}", True, (255, 255, 255))
-        self.draw_surface.blit(text, (5, 5))
-        
+        self.draw_surface.blit(text, (text_edge, 5))
+
+        res = self.get_outputs()
+        text = self.font.render(f"I(SP_TOT): {res[0]}", True, (255, 255, 255))
+        self.draw_surface.blit(text, (text_edge, 30))
+        text = self.font.render(f"I(SP_ANG): {res[1]}", True, (255, 255, 255))
+        self.draw_surface.blit(text, (text_edge, 55))
+        text = self.font.render(f"I(FL_CLO): {res[2]}", True, (255, 255, 255))
+        self.draw_surface.blit(text, (text_edge, 80))
+        text = self.font.render(f"I(FL_ANG): {res[3]}", True, (255, 255, 255))
+        self.draw_surface.blit(text, (text_edge, 105))
+        for angle in range(16):
+            text = self.font.render(f"I(COL{angle:02}): {res[4 + angle]}", True, (255, 255, 255))
+            self.draw_surface.blit(text, (text_edge, 130 + (25 * angle)))
+
         pygame.display.flip()
 
     def get_inputs(self):
@@ -111,6 +141,67 @@ class Game:
         if self.brain is not None:
             raise NotImplemented("I have no brain yet")
             res = brain.get_inputs(self.get_outputs())
+
+        return res
+
+
+    def find_collision(self, angle, length=30):
+        # Find closeness from self at a rotation of angle (0.0 to 1.0) to the edge
+        # 1. Get current location and extend forward by length
+        x = self.player_pos[0]
+        y = self.player_pos[1]
+        x_off = math.sin((self.player_pos[2] + angle) * math.pi * 2) * length
+        y_off = -math.cos((self.player_pos[2] + angle) * math.pi * 2) * length
+
+        if x + x_off < 0:
+            m = abs(x / x_off)
+            x_off *= m
+            y_off *= m
+        elif x + x_off > self.width:
+            # Intersection multiple is (self.width - x) / ((self.width - x) + x_off)
+            m = abs((self.width - x) / x_off)
+            x_off *= m
+            y_off *= m
+
+        if y + y_off < 0:
+            m = abs(y / y_off)
+            x_off *= m
+            y_off *= m
+        elif y + y_off > self.height:
+            # Intersection multiple is (self.width - x) / ((self.width - x) + x_off)
+            m = abs((self.height - y) / y_off)
+            x_off *= m
+            y_off *= m
+
+        distance = math.sqrt((x_off * x_off) + (y_off * y_off))
+        if distance > length:
+            return 0.0, x_off, y_off
+        return min(((30 - distance) / length, 1.0)), x_off, y_off
+
+
+    def get_outputs(self):
+        distance_to_flag_vec = [self.player_pos[0] - self.flag_pos[0], self.player_pos[1] - self.flag_pos[1]]
+        closeness_to_flag = min(1.0, 2 / math.sqrt((distance_to_flag_vec[0] * distance_to_flag_vec[0]) + (distance_to_flag_vec[1] * distance_to_flag_vec[1])))
+
+        flag_bearing = ((math.atan2(distance_to_flag_vec[1], distance_to_flag_vec[0]) / (2 * math.pi)) + 0.25) % 1.0
+        flag_relative_bearing = (((flag_bearing - self.player_pos[2]) % 1) * 2.0) - 1.0
+
+        speed_total = math.sqrt((self.player_speed[0] * self.player_speed[0]) + (self.player_speed[1] * self.player_speed[1])) / MAX_SPEED
+        if speed_total > 0:
+            speed_bearing = ((math.atan2(self.player_speed[1], self.player_speed[0]) / (2 * math.pi)) + 0.25) % 1.0
+            speed_relative_bearing = ((((self.player_pos[2] + 0.5) - speed_bearing) % 1) * 2.0) - 1.0
+        else:
+            speed_relative_bearing = 0.0
+
+        res = [
+            speed_total,                       # Current speed amplitude
+            speed_relative_bearing,            # Speed vector angle to facing
+            closeness_to_flag,                 # Higher if we are closer to the flag (inverse distance to flag)
+            flag_relative_bearing,             # Rotation relative to us towards flag (0 == ahead, 0.5 == right 90deg, -0.5 == left 90deg)
+        ]
+        for angle in range(16):
+            intensity, _, _ = self.find_collision(angle / 16)
+            res.append(intensity)
 
         return res
 

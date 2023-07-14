@@ -14,16 +14,13 @@ class TTTModel(torch.nn.Module):
     def __init__(self):
         super(TTTModel, self).__init__()
 
-        # 27 inputs, 50 hidden
-        self.linear1 = torch.nn.Linear(27, 50)
-        self.activation = torch.nn.Tanh()
-        # 50 hidden to 9 output
-        self.linear2 = torch.nn.Linear(50, 9)
-        self.softmax = torch.nn.Softmax()
+        self.layers = torch.nn.Sequential(
+            torch.nn.Linear(27, 54, bias=False),  # No bias due to BatchNorm1d layer
+            torch.nn.BatchNorm1d(54),
+            torch.nn.ReLU(),
+            torch.nn.Linear(54, 9),
+            torch.nn.Softmax(dim=1),
+        )
 
     def forward(self, x):
-        x = self.linear1(x)
-        x = self.activation(x)
-        x = self.linear2(x)
-        x = self.softmax(x)
-        return x
+        return self.layers(x)
